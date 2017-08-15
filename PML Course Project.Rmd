@@ -1,0 +1,190 @@
+---
+title: "PML Course Project"
+author: "acabaya"
+date: "8/15/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+## What you should submit
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+
+## Initialize
+
+Install the packages that will be used for this project:
+```{r echo=TRUE}
+library(caret)
+library(rattle)
+library(randomForest)
+library(gridExtra)
+```
+
+
+Load the data downloaded data set. Make sure it saved into the default working directory
+```{r echo=TRUE}
+pmltraining <- read.table("./pml-training.csv", header=TRUE, sep=",")
+pmltesting <- read.table("./pml-testing.csv", header=TRUE, sep=",")
+
+dim(pmltraining)
+dim(pmltesting)
+```
+
+
+## Cleaning the data sets
+
+The training and testing data set have 160 variables! Most of these varables are either have NA values and/or are not relevanat to the study.
+
+### Training Data Set:
+```{r echo=TRUE}
+pmltrainig2 <- pmltraining[ , grepl("^roll",names(pmltraining))]
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[ , grepl("^pitch",names(pmltraining))])
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[, grepl("^yaw",names(pmltraining))])
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[, grepl("^accel",names(pmltraining))])
+
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[, grepl("^magnet",names(pmltraining))])
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[, grepl("^gyro",names(pmltraining))])
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[, grepl("^total",names(pmltraining))])
+pmltrainig2 <- cbind(pmltrainig2, pmltraining[, "classe"])
+
+colnames(pmltrainig2)[53] <- "classe"
+dim(pmltrainig2)
+```
+
+
+### Testing Data Set:
+```{r echo=TRUE}
+pmltesting2 <- pmltesting[ , grepl("^roll",names(pmltesting))]
+pmltesting2 <- cbind(pmltesting2, pmltesting[ , grepl("^pitch",names(pmltesting))])
+pmltesting2 <- cbind(pmltesting2, pmltesting[, grepl("^yaw",names(pmltesting))])
+pmltesting2 <- cbind(pmltesting2, pmltesting[ , grepl("^accel",names(pmltesting))])
+
+pmltesting2 <- cbind(pmltesting2, pmltesting[, grepl("^magnet",names(pmltesting))])
+pmltesting2 <- cbind(pmltesting2, pmltesting[, grepl("^gyro",names(pmltesting))])
+pmltesting2 <- cbind(pmltesting2, pmltesting[, grepl("^total",names(pmltesting))])
+pmltesting2 <- cbind(pmltesting2, pmltesting[, "problem_id"])
+
+colnames(pmltesting2)[53] <- "problem_id"
+dim(pmltesting2)
+```
+
+Both Training and Tesitng Data are not reduced to 53 variables.
+
+
+Perform further cleaning by removing other varaibles that are not numeric class.
+
+```{r echo=TRUE}
+# identify variables that are numeric class
+numCol <- which(lapply(pmltesting2, class) %in% "numeric")
+
+# assign these varaibles to new trainingS and add classe column.
+trainingS <- pmltrainig2[, numCol]
+trainingS$classe <- pmltrainig2$classe
+
+#perform the same to testing data set.
+testing <- pmltesting2[, numCol]
+```
+
+
+## Data Splitting the Training Data Set
+
+Since the training data set have 19,622 we will split the dataset into 2 subsets: training and xvalidation. We will build our model on the training and use the xvalidation for cross validation later.
+
+Since the data set is large enough, lets split by 75:25.
+
+```{r echo=TRUE}
+set.seed(12031987)
+inTrain<- createDataPartition(trainingS$classe, p=0.75, list=FALSE)
+
+training <- trainingS[inTrain, ]
+xvalidation <- trainingS[-inTrain, ]
+```
+
+
+```{r echo=TRUE}
+dim(training)
+```
+
+```{r echo=TRUE}
+dim(xvalidation)
+```
+
+## The Train Model Using Random Forrest
+A random forest model was tested to see if that method fit the data appropriately.
+
+```{r echo=TRUE}
+modFit <- train(classe ~., method="rf", data=training, 
+                  trControl=trainControl(method='cv'), 
+                  number=5, allowParallel=TRUE, importance=TRUE )
+modFit
+```
+
+We derive a high degree of model fit acuracy using the 24 variables.
+
+
+## Calculate and Plot Variable Importance
+
+We can determine the level of importance of each varable from the following lines:
+```{r echo=TRUE}
+varImp(modFit)
+varImpPlot(modFit$finalModel, sort = TRUE, type = 1, pch = 19, col = 1, cex = 0.6, 
+           main = "Importance of the Individual Principal Components")
+```
+
+
+## In Sample & Out of Sample Error
+
+Perform the in-sample error to get the error rate using the the same data used to build the predictor.
+```{r echo=TRUE}
+inSample = predict(modFit, training)
+confusionMatrix(training$classe, inSample)
+```
+The random forest model has a 99.6% accuracy. The specificity and sensitivity is more than 99% for all variables. 
+
+Since we have a high accuracy based on the in-sample test, we can now cross validate it with the xvalidation dataset we have set aside and determine the accuracy of the train model we have.
+
+```{r echo=TRUE}
+outSample = predict(modFit, xvalidation)
+confusionMatrix(xvalidation$classe, outSample)
+```
+
+
+## Predicting Classe of Testing Data Set
+
+Utilize the prediction model on the testing data set. 
+```{r echo=TRUE}
+answer <- predict(modFit, newdata=testing)
+answer
+```
+Given of the high degree of accuracy using the xvalidatation subset, we can also say with a high degree of confidence that the answers we got when we applide the prediction model on the testing data set.
+
+## Conclusion
+
+Random Forrest provides a high degree of accuracy given the data set we have. The high level of accuracy was mainly due to the fact that we have a fairly large training data set to work with. We could also note that the method we used, though it gave a high level of accuracy, the modelling took considerable amount of time to calculate.
+
+
+
+
+
+---
